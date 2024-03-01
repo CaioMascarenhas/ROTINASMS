@@ -27,6 +27,29 @@ async function initOracleClient() {
     }
 };
 
+function UrlOriginal(atendimento, cd_ped_lab, cd_paciente) {
+    const encryptedAtendimento = CryptoJS.AES.encrypt(String(atendimento), 'desenvolvimento').toString();
+    const encryptedCodigoPaciente = CryptoJS.AES.encrypt(String(cd_paciente), 'desenvolvimento').toString();
+    const encryptedNumeroPedido = CryptoJS.AES.encrypt(String(cd_ped_lab), 'desenvolvimento').toString();
+
+    const urlOriginal = `localhost:3000/exames?atendimento=${encodeURIComponent(encryptedAtendimento)}&codigoPaciente=${encodeURIComponent(encryptedCodigoPaciente)}&numeroPedido=${encodeURIComponent(encryptedNumeroPedido)}`
+    return urlOriginal
+}
+
+async function UrlEncurtada(urlOriginal,atendimento,codigopedido) {
+    try {
+        await axios.post(`http://172.20.30.78:5001/shorten/${codigopedido}/${atendimento}`, {
+            url: urlOriginal
+        }).then(response => {
+            console.log('URL encurtada:', response.data);
+            return response.data.short_url;
+        })
+
+    } catch (error) {
+        console.error('Erro ao encurtar a URL:', error);
+        throw error;
+    }
+}
 
 async function run() {
     await initOracleClient();
@@ -51,6 +74,8 @@ async function run() {
                     const pdfContent = responsePdf.data;
 
                     // Simulação do envio de SMS
+                    const urlOriginal = UrlOriginal(item.CD_ATENDIMENTO, item.CD_PED_LAB, item.CD_PACIENTE)
+                    // await UrlEncurtada(urlOriginal, item.CD_ATENDIMENTO, item.CD_PED_LAB);
                     console.log('enviou!!!');
 
                     const dataAtual = new Date();
@@ -59,9 +84,9 @@ async function run() {
                     // Montar a instrução SQL para inserção no banco de dados
                     const sqlInsert = `
             INSERT INTO DBAMV.SCMM_SMS_EXAMES
-            (CD_ATENDIMENTO, NM_PACIENTE, NR_FONE, CD_PED_LAB, DT_CONFIRMA_LAB, SMS_ENVIADO, DT_ENVIO, PDF_ARQUIVO, CD_PACIENTE)
+            (CD_ATENDIMENTO, NM_PACIENTE, NR_FONE, CD_PED_LAB, DT_CONFIRMA_LAB, SMS_ENVIADO, DT_ENVIO, PDF_ARQUIVO, CD_PACIENTE, URL_ORIGINAL)
             VALUES
-            (:cd_atendimento, :nm_paciente, :nr_fone, :cd_ped_lab, TO_DATE(:dt_confirma_lab, 'DD/MM/YYYY HH24:MI'), 'S', TO_DATE(:dt_envio, 'DD/MM/YYYY HH24:MI:SS'), :pdf_blob, :cd_paciente)
+            (:cd_atendimento, :nm_paciente, :nr_fone, :cd_ped_lab, TO_DATE(:dt_confirma_lab, 'DD/MM/YYYY HH24:MI'), 'S', TO_DATE(:dt_envio, 'DD/MM/YYYY HH24:MI:SS'), :pdf_blob, :cd_paciente, :url_original)
           `;
 
                     await connection.execute(sqlInsert, {
@@ -72,9 +97,11 @@ async function run() {
                         dt_confirma_lab: item.DT_CONFIRMA_LAB,
                         dt_envio: dataEnvio,
                         pdf_blob: pdfContent,
-                        cd_paciente: item.CD_PACIENTE
+                        cd_paciente: item.CD_PACIENTE,
+                        url_original: urlOriginal
                     });
                     await connection.commit();
+                    await UrlEncurtada(urlOriginal, item.CD_ATENDIMENTO, item.CD_PED_LAB);
                     console.log(`Registro inserido no banco de dados para ${item.NM_PACIENTE}`);
                 }
             } catch (error) {
